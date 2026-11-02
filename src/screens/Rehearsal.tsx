@@ -184,9 +184,14 @@ export default function Rehearsal({ songId, part, then }: { songId: string; part
       <TopBar
         title={`Stämrep · ${song.title}`}
         right={
-          <button className="rounded-full bg-brand-100 px-3 py-1.5 text-sm font-extrabold text-brand-700" onClick={() => setHideText((h) => !h)}>
-            {hideText ? 'Visa text' : 'Dölj text'}
-          </button>
+          <span className="flex gap-1.5">
+            <button className="rounded-full bg-brand-100 px-3 py-1.5 text-sm font-extrabold text-brand-700" onClick={() => nav.go({ name: 'notes', songId })}>
+              Noter
+            </button>
+            <button className="rounded-full bg-brand-100 px-3 py-1.5 text-sm font-extrabold text-brand-700" onClick={() => setHideText((h) => !h)}>
+              {hideText ? 'Visa text' : 'Dölj text'}
+            </button>
+          </span>
         }
       />
       <main className="flex-1 px-4 pb-64">

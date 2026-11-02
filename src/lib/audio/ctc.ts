@@ -229,3 +229,39 @@ export function applyCtc(sections: Section[], lp: Float32Array, frames: number, 
   }
   return out
 }
+
+/**
+ * When each word is sung, found line by line inside the line times the fine-sync gave: `start`
+ * is where the model first hears the word, `end` where it last hears it (often early, since the
+ * model hears a word in a short burst). Words it cannot place get NaN.
+ */
+export function wordTimes(sections: Section[], lp: Float32Array, frames: number, vocabSize: number, v: Vocab): { text: string; start: number; end: number; section: number; line: number }[] {
+  const out: { text: string; start: number; end: number; section: number; line: number }[] = []
+  sections.forEach((sec, si) =>
+    sec.lines.forEach((line, li) => {
+      const raw = line.text.split(/\s+/).filter((w) => words(w).length)
+      if (line.start == null || line.end == null) {
+        raw.forEach((w) => out.push({ text: w, start: NaN, end: NaN, section: si, line: li }))
+        return
+      }
+      const toks: number[] = []
+      const owner: number[] = []
+      raw.forEach((w, wi) => words(w).forEach((x) => tokenize(x, v).forEach((t) => (toks.push(t), owner.push(wi)))))
+      const f0 = Math.max(0, Math.floor((line.start - 0.3) / CTC_FRAME))
+      const f1 = Math.min(frames, Math.ceil((line.end + 0.3) / CTC_FRAME))
+      const al = toks.length && f1 > f0 ? forceAlign(lp.subarray(f0 * vocabSize, f1 * vocabSize), f1 - f0, vocabSize, toks, v.blank) : null
+      raw.forEach((w, wi) => {
+        let a = Infinity
+        let b = -1
+        owner.forEach((o, k) => {
+          if (o !== wi || !al || al.first[k] < 0) return
+          a = Math.min(a, al.first[k])
+          b = Math.max(b, al.last[k])
+        })
+        const ok = Number.isFinite(a) && b >= 0
+        out.push({ text: w, start: ok ? (f0 + a) * CTC_FRAME : NaN, end: ok ? (f0 + b + 1) * CTC_FRAME : NaN, section: si, line: li })
+      })
+    }),
+  )
+  return out
+}
