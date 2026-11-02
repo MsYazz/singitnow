@@ -8,7 +8,7 @@ test.skip(!DIR || !existsSync(DIR), 'MATERIAL_DIR not set')
 test('write the voices out as notes', async ({ page }) => {
   await page.goto('./')
   await page.locator('input[webkitdirectory]').setInputFiles(DIR!)
-  await expect(page.getByText(/låtar? hittade/)).toBeVisible({ timeout: 1_200_000 })
+  await expect(page.getByText(/låt(ar)? hittade/)).toBeVisible({ timeout: 1_200_000 })
   await page.getByRole('button', { name: 'Alt 2', exact: true }).click()
   await page.getByPlaceholder('Ditt förnamn').fill('Ella')
   await page.getByRole('button', { name: 'Kör igång' }).click()

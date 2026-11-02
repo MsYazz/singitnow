@@ -20,7 +20,15 @@ const chip = (on: boolean) => `rounded-full px-3 py-1 text-sm font-extrabold ${o
 export default function Notes({ songId }: { songId: string }) {
   const { settings } = useSettings()
   const song = useLiveQuery(() => db.songs.get(songId), [songId])
-  const voices = useMemo(() => (song ? Object.keys(song.voices).sort() : []), [song])
+  // Highest voice first, as in a choir score; voices not written out yet last.
+  const voices = useMemo(() => {
+    if (!song) return []
+    const mid = (v: string) => {
+      const ns = song.voices[v].notes ?? []
+      return ns.length ? ns.reduce((s, n) => s + n.pitch, 0) / ns.length : -Infinity
+    }
+    return Object.keys(song.voices).sort((a, b) => mid(b) - mid(a) || a.localeCompare(b))
+  }, [song])
   const mine = song ? (pickVoice(song.voices, settings.voices) ?? voices[0]) : ''
   const [shown, setShown] = useState<Set<string> | null>(null)
   const [textVoice, setTextVoice] = useState<string | null>(null)
