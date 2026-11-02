@@ -29,13 +29,14 @@ async function loadModel(url: string): Promise<ArrayBuffer> {
 
 let session: Promise<ort.InferenceSession> | null = null
 
-/** Pitch of one voice: Hz per 10 ms frame (0 where there is no clear pitch). */
+/** Pitch of one voice: Hz per 10 ms frame (0 where there is no clear pitch), and how sure the model is. */
 self.onmessage = async (e: MessageEvent<{ modelUrl: string; pcm: Float32Array }>) => {
   try {
     session ??= loadModel(e.data.modelUrl).then((b) => ort.InferenceSession.create(b, { executionProviders: ['wasm'] }))
     const s = await session
     const mel = pitchMel(e.data.pcm)
     const hz = new Float32Array(mel.frames)
+    const conf = new Float32Array(mel.frames)
     for (let c = 0; c < mel.frames; c += CHUNK) {
       const a = Math.max(0, c - OVERLAP)
       const b = Math.min(mel.frames, c + CHUNK + OVERLAP)
@@ -43,9 +44,10 @@ self.onmessage = async (e: MessageEvent<{ modelUrl: string; pcm: Float32Array }>
       const out = await s.run({ mel: new ort.Tensor('float32', x, [1, b - a, PITCH_MELS]) })
       const p = readPitch(out[s.outputNames[0]].data as Float32Array, b - a)
       hz.set(p.hz.subarray(c - a, Math.min(b, c + CHUNK) - a), c)
+      conf.set(p.conf.subarray(c - a, Math.min(b, c + CHUNK) - a), c)
       self.postMessage({ progress: Math.min(1, (c + CHUNK) / mel.frames) })
     }
-    self.postMessage({ hz }, [hz.buffer])
+    self.postMessage({ hz, conf }, [hz.buffer, conf.buffer])
   } catch (err) {
     session = null
     self.postMessage({ error: err instanceof Error ? err.message : String(err) })

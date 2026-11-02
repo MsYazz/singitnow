@@ -75,12 +75,17 @@ export function toMusicXml(title: string, parts: { name: string; notes: ScoreNot
         cur = Math.max(cur, b)
       }
       if (cur < b1) ev.push({ a: cur, b: b1, n: null })
-      // Written notes and rests. Something that starts off the beat and runs over it is split at
-      // the beat (tied), so every beat can be read on its own.
+      // Written notes and rests. Something that starts off the beat and runs over the middle of
+      // the bar is split there (tied), as is usual in 4/4, so the bar can be read in two halves.
+      const half = (meter % 2 ? meter : meter / 2) * GRID
       const items: { a: number; d: number; n: ScoreNote | null; first: boolean; last: boolean; whole: boolean }[] = []
       for (const e of ev) {
         const cuts = [e.a]
-        if (e.a % GRID && Math.ceil(e.a / GRID) * GRID < e.b) cuts.push(Math.ceil(e.a / GRID) * GRID)
+        const mid = b0 + Math.ceil((e.a - b0) / half) * half
+        const nextBeat = b0 + Math.ceil((e.a - b0) / GRID) * GRID
+        // A rest that starts off the beat first fills up to the beat.
+        if (!e.n && nextBeat > e.a && nextBeat < e.b) cuts.push(nextBeat)
+        if ((e.a - b0) % (e.n ? GRID : half) && mid < e.b && mid > cuts.at(-1)!) cuts.push(mid)
         cuts.push(e.b)
         for (let c = 0; c + 1 < cuts.length; c++) {
           let at = cuts[c]

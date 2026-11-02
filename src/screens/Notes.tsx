@@ -6,7 +6,7 @@ import { Mixer, unlockAudio } from '../lib/audio/engine'
 import { beatAt } from '../lib/audio/beats'
 import { findKey, GRID, quantize, scoreBeats, stepTime, tidy } from '../lib/notation/notes'
 import { layout, toMusicXml } from '../lib/notation/musicxml'
-import { NOTES_VERSION, transcribeVoice } from '../lib/notation/transcribe'
+import { NOTES_VERSION, transcribeSong } from '../lib/notation/transcribe'
 import { useSettings } from '../settings'
 import { pickVoice } from '../lib/names'
 import { TopBar } from '../components/ui'
@@ -131,12 +131,10 @@ export default function Notes({ songId }: { songId: string }) {
   const write = async (list: string[]) => {
     setErr(null)
     try {
-      for (const v of list) {
-        setBusy({ voice: v, share: 0 })
-        const fresh = await db.songs.get(songId)
-        if (!fresh) return
-        await transcribeVoice(fresh, v, (share) => setBusy({ voice: v, share }))
-      }
+      setBusy({ voice: list[0], share: 0 })
+      const fresh = await db.songs.get(songId)
+      if (!fresh) return
+      await transcribeSong(fresh, list, (voice, share) => setBusy({ voice, share }))
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {

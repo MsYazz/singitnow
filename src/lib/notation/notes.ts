@@ -28,6 +28,8 @@ export interface WordTime {
 }
 
 const HOP = 1 / PITCH_FPS
+/** How sure the pitch model must be (0..1) for a frame to count. */
+const SURE = 0.3
 const VOWELS = /[aeiouyåäöæø]+/gi
 
 /** A rough split of a word into syllables (English and Swedish), enough to place text under notes. */
@@ -131,13 +133,19 @@ function steadyNotes(m: Float32Array, t0: number, t1: number, minLen = 0.07, jum
  * The notes of one voice: the pitch (Hz per 10 ms frame, 0 = no pitch) split into notes at the
  * words, and within words where the pitch moves, with each note given its syllable.
  */
-export function findNotes(hz: Float32Array, words: WordTime[], spans: [number, number][], duration: number): SungNote[] {
-  const m = Float32Array.from(hz, midiOf)
+export function findNotes(hz: Float32Array, words: WordTime[], spans: [number, number][], duration: number, conf?: Float32Array): SungNote[] {
+  const loose = Float32Array.from(hz, midiOf)
+  // Frames where the pitch model is unsure are mostly breath, consonants or the backing
+  // track; they make up most of the stray notes. A word with no sure frames uses them anyway.
+  const m = conf ? loose.map((v, i) => (conf[i] >= SURE ? v : NaN)) : loose
   // Most recordings are not tuned exactly to A = 440 Hz.
   const dev: number[] = []
   for (let i = 0; i < m.length; i += 3) if (!Number.isNaN(m[i])) dev.push(((m[i] + 0.5) % 1) - 0.5)
   const tune = median(dev) || 0
-  for (let i = 0; i < m.length; i++) m[i] -= tune
+  for (let i = 0; i < m.length; i++) {
+    m[i] -= tune
+    if (m !== loose) loose[i] -= tune
+  }
   const spanEnd = (t: number) => spans.find(([a, b]) => a - 0.05 <= t && t < b)?.[1] ?? t + 0.6
   const ws = words.filter((w) => Number.isFinite(w.start))
   const out: SungNote[] = []
@@ -145,7 +153,8 @@ export function findNotes(hz: Float32Array, words: WordTime[], spans: [number, n
     const next = i + 1 < ws.length ? ws[i + 1].start : duration
     const t0 = Math.max(0, w.start - 0.06)
     const t1 = Math.min(next - 0.02, Math.max(spanEnd(w.start + 0.05), w.end + 0.3))
-    const segs = steadyNotes(m, t0, t1)
+    let segs = steadyNotes(m, t0, t1)
+    if (!segs.length && m !== loose) segs = steadyNotes(loose, t0, t1)
     if (!segs.length) return
     let syl = syllables(w.text)
     // One syllable per note while both last; more notes than syllables sing the last one on.
@@ -271,6 +280,21 @@ export function tidy(notes: SungNote[], key: Key): (SungNote & { midi: number })
       break
     }
   }
+  // Stray notes: short, far from the notes on both sides (a leap there and straight back), as
+  // when the pitch model briefly hears the backing or another voice. Its syllable, if any, moves
+  // to the next note of the same word; a syllable with no other note keeps its note.
+  const near = (x: { start: number; end: number }, y: { start: number; end: number }) => y.start - x.end < 0.3
+  for (let i = 0; i < out.length; ) {
+    const n = out[i]
+    const nb = [i - 1, i + 1].filter((j) => j >= 0 && j < out.length && (j < i ? near(out[j], n) : near(n, out[j])))
+    const stray = n.end - n.start < 0.25 && nb.length > 0 && nb.every((j) => Math.abs(out[j].pitch - n.pitch) >= 4.5)
+    const heir = i + 1 < out.length && out[i + 1].word === n.word && out[i + 1].text == null ? i + 1 : -1
+    if (stray && (n.text == null || heir >= 0)) {
+      if (n.text != null) out[heir] = { ...out[heir], start: n.start, text: n.text, wordStart: n.wordStart, hyphen: n.hyphen }
+      out.splice(i, 1)
+      i = Math.max(0, i - 1)
+    } else i++
+  }
   // Vibrato read as notes: a-b-a with b a step away and short becomes one held a.
   for (let i = 0; i + 2 < out.length; ) {
     const [a, b, c] = [out[i], out[i + 1], out[i + 2]]
@@ -298,32 +322,23 @@ export function scoreBeats(b: Beats): Beats {
 
 export const GRID = 4 // sixteenths per beat
 
-/**
- * Puts notes in time on the song's beat. Notes go on eighths, which are easier to read; a
- * sixteenth is used only where two notes would otherwise land on the same eighth.
- */
+/** Puts notes on the sixteenth grid of the song's beat. */
 export function quantize(notes: (SungNote & { midi: number })[], beats: Beats): ScoreNote[] {
   const out: ScoreNote[] = []
   for (const n of notes) {
-    const s = beatAt(beats, n.start) * GRID
-    const e = beatAt(beats, n.end) * GRID
+    let a = Math.round(beatAt(beats, n.start) * GRID)
+    let b = Math.round(beatAt(beats, n.end) * GRID)
     const prev = out.at(-1)
-    // A quick turn on the same syllable (shorter than about a sixteenth) is sung as part of the
-    // note before it, rather than written as its own small note.
-    if (prev && n.text == null && prev.word === n.word && e - s < 1.5) {
-      prev.b = Math.max(prev.b, Math.round(e / 2) * 2, prev.a + 1)
-      continue
-    }
-    let a = Math.round(s / 2) * 2
-    if (prev && a <= prev.a) a = Math.max(prev.a + 1, Math.round(s))
-    // A note on an odd sixteenth ends on the next eighth, so the next note is back on eighths.
-    const b = Math.max(Math.round(e / 2) * 2, a + (a % 2 ? 1 : 2))
+    if (prev && a < prev.b) a = prev.b
+    if (b <= a) b = a + 1
     out.push({ ...n, a, b })
   }
   for (let i = 0; i + 1 < out.length; i++) {
     const [x, y] = [out[i], out[i + 1]]
-    // Legato: a note lasts until the next unless there is a real pause (more than half a beat).
-    if (y.a - x.b > 0 && y.a - x.b <= GRID / 2) x.b = y.a
+    // Legato: a note lasts until the next one unless there is a real pause: more than a beat
+    // within a lyric line, more than half a beat between lines.
+    const sameLine = x.section === y.section && x.line === y.line
+    if (y.a - x.b > 0 && y.a - x.b <= (sameLine ? GRID : GRID / 2)) x.b = y.a
     if (x.b > y.a) x.b = Math.max(x.a + 1, y.a)
   }
   return out
