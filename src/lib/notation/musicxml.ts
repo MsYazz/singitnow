@@ -75,32 +75,61 @@ export function toMusicXml(title: string, parts: { name: string; notes: ScoreNot
         cur = Math.max(cur, b)
       }
       if (cur < b1) ev.push({ a: cur, b: b1, n: null })
+      // Written notes and rests. Something that starts off the beat and runs over it is split at
+      // the beat (tied), so every beat can be read on its own.
+      const items: { a: number; d: number; n: ScoreNote | null; first: boolean; last: boolean; whole: boolean }[] = []
       for (const e of ev) {
-        const ps = pieces(e.b - e.a)
-        ps.forEach((d, i) => {
-          const [type, dots] = TYPES[d]
-          if (!e.n) {
-            const whole = e.a === b0 && e.b === b1
-            x.push(whole ? `<note><rest measure="yes"/><duration>${d}</duration></note>` : `<note><rest/><duration>${d}</duration><type>${type}</type>${'<dot/>'.repeat(dots)}</note>`)
-            return
+        const cuts = [e.a]
+        if (e.a % GRID && Math.ceil(e.a / GRID) * GRID < e.b) cuts.push(Math.ceil(e.a / GRID) * GRID)
+        cuts.push(e.b)
+        for (let c = 0; c + 1 < cuts.length; c++) {
+          let at = cuts[c]
+          for (const d of pieces(cuts[c + 1] - at)) {
+            items.push({ a: at, d, n: e.n, first: e.n ? at === e.n.a : false, last: e.n ? at + d === e.n.b : false, whole: !e.n && e.a === b0 && e.b === b1 })
+            at += d
           }
-          const n = e.n
-          const [step, alter] = spell[((n.midi % 12) + 12) % 12]
-          const octave = Math.floor(n.midi / 12) - 1
-          const first = e.a === n.a && i === 0
-          const last = e.b === n.b && i === ps.length - 1
-          const tie = (first ? '' : '<tie type="stop"/>') + (last ? '' : '<tie type="start"/>')
-          const tied = (first ? '' : '<tied type="stop"/>') + (last ? '' : '<tied type="start"/>')
-          let lyric = ''
-          if (text && first && n.text) {
-            const syl = n.wordStart ? (n.hyphen ? 'begin' : 'single') : n.hyphen ? 'middle' : 'end'
-            lyric = `<lyric number="1"><syllabic>${syl}</syllabic><text>${esc(n.text)}</text></lyric>`
-          }
-          x.push(
-            `<note><pitch><step>${step}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${octave}</octave></pitch><duration>${d}</duration>${tie}<type>${type}</type>${'<dot/>'.repeat(dots)}${tied ? `<notations>${tied}</notations>` : ''}${lyric}</note>`,
-          )
-        })
+        }
       }
+      // Beams: eighths and sixteenths in the same beat are joined; sixteenths get a second beam.
+      const beams: string[] = items.map(() => '')
+      for (let i = 0; i < items.length; ) {
+        const beat = Math.floor((items[i].a - b0) / GRID)
+        let j = i
+        while (j < items.length && items[j].n && items[j].d < GRID && Math.floor((items[j].a - b0) / GRID) === beat) j++
+        if (j - i >= 2) {
+          for (let k = i; k < j; k++) {
+            let b = `<beam number="1">${k === i ? 'begin' : k === j - 1 ? 'end' : 'continue'}</beam>`
+            if (items[k].d === 1) {
+              const prev16 = k > i && items[k - 1].d === 1
+              const next16 = k + 1 < j && items[k + 1].d === 1
+              const kind = prev16 && next16 ? 'continue' : prev16 ? 'end' : next16 ? 'begin' : k === i ? 'forward hook' : 'backward hook'
+              b += `<beam number="2">${kind}</beam>`
+            }
+            beams[k] = b
+          }
+        }
+        i = Math.max(j, i + 1)
+      }
+      items.forEach((it, i) => {
+        const [type, dots] = TYPES[it.d]
+        if (!it.n) {
+          x.push(it.whole ? `<note><rest measure="yes"/><duration>${it.d}</duration></note>` : `<note><rest/><duration>${it.d}</duration><type>${type}</type>${'<dot/>'.repeat(dots)}</note>`)
+          return
+        }
+        const n = it.n
+        const [step, alter] = spell[((n.midi % 12) + 12) % 12]
+        const octave = Math.floor(n.midi / 12) - 1
+        const tie = (it.first ? '' : '<tie type="stop"/>') + (it.last ? '' : '<tie type="start"/>')
+        const tied = (it.first ? '' : '<tied type="stop"/>') + (it.last ? '' : '<tied type="start"/>')
+        let lyric = ''
+        if (text && it.first && n.text) {
+          const syl = n.wordStart ? (n.hyphen ? 'begin' : 'single') : n.hyphen ? 'middle' : 'end'
+          lyric = `<lyric number="1"><syllabic>${syl}</syllabic><text>${esc(n.text)}</text></lyric>`
+        }
+        x.push(
+          `<note><pitch><step>${step}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${octave}</octave></pitch><duration>${it.d}</duration>${tie}<type>${type}</type>${'<dot/>'.repeat(dots)}${beams[i]}${tied ? `<notations>${tied}</notations>` : ''}${lyric}</note>`,
+        )
+      })
       x.push('</measure>')
     }
     x.push('</part>')

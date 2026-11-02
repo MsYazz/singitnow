@@ -42,4 +42,21 @@ describe('notes from pitch and words', () => {
     expect(xml).toContain('<text>b</text>')
     expect((xml.match(/<measure /g) ?? []).length).toBe(1)
   })
+
+  it('prefers eighths, uses sixteenths only to keep notes apart, and beams within a beat', () => {
+    const n = (start: number, end: number, midi: number, text: string | null, word: number) => ({ start, end, pitch: midi, midi, text, wordStart: text != null, hyphen: false, word, section: 0, line: 0 })
+    const beats = { bpm: 60, times: [0, 1, 2, 3, 4, 5], meter: 4, first: 0 }
+    // 0.3 s would be a dotted sixteenth; two syllables in one eighth need a sixteenth; a quick turn joins the note before.
+    const q = quantize([n(0, 0.3, 60, 'a', 0), n(0.55, 0.7, 62, 'b', 1), n(0.7, 1, 64, 'c', 2), n(1, 1.4, 65, 'd', 3), n(1.4, 1.5, 64, null, 3)], beats)
+    expect(q.map((x) => [x.a, x.b])).toEqual([
+      [0, 2],
+      [2, 3],
+      [3, 4],
+      [4, 6],
+    ])
+    const key = findKey([q])
+    const xml = toMusicXml('Test', [{ name: 'S', notes: q }], key, 4, layout([q], 4, 0), new Set())
+    expect(xml).toContain('<beam number="1">begin</beam>')
+    expect(xml).toContain('<beam number="2">begin</beam>')
+  })
 })

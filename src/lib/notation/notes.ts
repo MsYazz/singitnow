@@ -298,15 +298,26 @@ export function scoreBeats(b: Beats): Beats {
 
 export const GRID = 4 // sixteenths per beat
 
-/** Puts notes on the sixteenth grid of the song's beat. */
+/**
+ * Puts notes in time on the song's beat. Notes go on eighths, which are easier to read; a
+ * sixteenth is used only where two notes would otherwise land on the same eighth.
+ */
 export function quantize(notes: (SungNote & { midi: number })[], beats: Beats): ScoreNote[] {
   const out: ScoreNote[] = []
   for (const n of notes) {
-    let a = Math.round(beatAt(beats, n.start) * GRID)
-    let b = Math.round(beatAt(beats, n.end) * GRID)
+    const s = beatAt(beats, n.start) * GRID
+    const e = beatAt(beats, n.end) * GRID
     const prev = out.at(-1)
-    if (prev && a < prev.b) a = prev.b
-    if (b <= a) b = a + 1
+    // A quick turn on the same syllable (shorter than about a sixteenth) is sung as part of the
+    // note before it, rather than written as its own small note.
+    if (prev && n.text == null && prev.word === n.word && e - s < 1.5) {
+      prev.b = Math.max(prev.b, Math.round(e / 2) * 2, prev.a + 1)
+      continue
+    }
+    let a = Math.round(s / 2) * 2
+    if (prev && a <= prev.a) a = Math.max(prev.a + 1, Math.round(s))
+    // A note on an odd sixteenth ends on the next eighth, so the next note is back on eighths.
+    const b = Math.max(Math.round(e / 2) * 2, a + (a % 2 ? 1 : 2))
     out.push({ ...n, a, b })
   }
   for (let i = 0; i + 1 < out.length; i++) {
