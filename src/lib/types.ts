@@ -1,4 +1,5 @@
 import type { Beats } from './audio/beats'
+import type { SungNote } from './notation/notes'
 /** A piece of a lyric line. `harmony` = colour-marked in the PDF (stämsång). */
 export interface LineSeg {
   text: string
@@ -64,6 +65,9 @@ export interface VoiceTrack {
   /** Singing activity, 2 values per second, 0..1. */
   activity: number[]
   analyzedAt: number
+  /** Notes found in the voice's audio for the score (Noter), and the version of the method. */
+  notes?: SungNote[]
+  notesV?: number
 }
 
 /** A Drive file noted for later, so a song can be downloaded the first time it is opened. */

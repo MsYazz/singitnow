@@ -26,6 +26,8 @@ export type Screen =
   | { name: 'rehearsal'; songId: string; part?: number; then?: Screen }
   | { name: 'tune'; songId: string }
   | { name: 'read'; songId: string }
+  /** The voices as notes (experiment). */
+  | { name: 'notes'; songId: string }
 
 export interface Nav {
   go: (s: Screen) => void
